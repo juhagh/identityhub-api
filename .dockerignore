@@ -1,0 +1,10 @@
+.git
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/*.user
+**/launchSettings.json
+Dockerfile
+compose.yaml
+.dockerignore

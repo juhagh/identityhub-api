@@ -17,5 +17,16 @@ services:
       timeout: 5s
       retries: 5
       
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=identityhub;Username=postgres;Password=postgres
+  
 volumes:
   identityhub-pgdata:
