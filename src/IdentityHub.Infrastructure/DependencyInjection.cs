@@ -1,3 +1,4 @@
+using IdentityHub.Application.Common.Interfaces;
 using IdentityHub.Infrastructure.Identity;
 using IdentityHub.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -33,6 +34,8 @@ public static class DependencyInjection
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>();
+
+        services.AddScoped<IIdentityService, IdentityService>();
 
         return services;
 
