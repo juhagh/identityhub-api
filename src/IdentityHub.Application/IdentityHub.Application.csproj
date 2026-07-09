@@ -4,6 +4,12 @@
     <ProjectReference Include="..\IdentityHub.Domain\IdentityHub.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Features\Login\" />
+    <Folder Include="Features\RefreshTokens\" />
+    <Folder Include="Features\Register\" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
