@@ -2,7 +2,7 @@ using IdentityHub.Application.Common.Results;
 
 namespace IdentityHub.Application.Tests;
 
-public class ResultTests
+public sealed class ResultTests
 {
     [Fact]
     public void Success_Should_Create_Result_With_No_Errors()

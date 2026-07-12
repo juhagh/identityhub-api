@@ -36,7 +36,14 @@ public static class DependencyInjection
             .AddEntityFrameworkStores<ApplicationDbContext>();
 
         services.AddScoped<IIdentityService, IdentityService>();
+        
+        services.AddOptions<JwtOptions>()
+            .BindConfiguration(JwtOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
+        services.AddScoped<ITokenService, TokenService>();
+        
         return services;
 
     }

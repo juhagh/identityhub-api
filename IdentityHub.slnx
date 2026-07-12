@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/IdentityHub.API.Tests/IdentityHub.API.Tests.csproj" />
     <Project Path="tests/IdentityHub.Application.Tests/IdentityHub.Application.Tests.csproj" />
+    <Project Path="tests/IdentityHub.Infrastructure.Tests/IdentityHub.Infrastructure.Tests.csproj" />
   </Folder>
 </Solution>
