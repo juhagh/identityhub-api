@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using IdentityHub.Application.Common.Interfaces;
+using IdentityHub.Application.Common.Options;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -13,12 +14,14 @@ internal sealed class TokenService : ITokenService
     internal const string RoleClaimType = "role";
     
     private readonly JwtOptions _jwtOptions;
+    private readonly AuthenticationOptions _authenticationOptions;
     private readonly SigningCredentials _signingCredentials;
     private static readonly JsonWebTokenHandler Handler = new();
     
-    public TokenService(IOptions<JwtOptions> jwtOptions)
+    public TokenService(IOptions<JwtOptions> jwtOptions, IOptions<AuthenticationOptions> authenticationOptions)
     {
         _jwtOptions = jwtOptions.Value;
+        _authenticationOptions = authenticationOptions.Value;
         _signingCredentials = new SigningCredentials(
             new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(_jwtOptions.Secret)),
@@ -41,10 +44,7 @@ internal sealed class TokenService : ITokenService
             Subject = new ClaimsIdentity(claims),
             Issuer = _jwtOptions.Issuer,
             Audience = _jwtOptions.Audience,
-            // Short‑lived access tokens (default 15 min, see JwtOptions)
-            // to reduce blast radius if a token is leaked or intercepted.
-            // Forces clients to rely on refresh‑token rotation for continued access and enables revoking access.
-            Expires = DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenLifetimeMinutes),
+            Expires = DateTime.UtcNow.AddMinutes(_authenticationOptions.AccessTokenLifetimeMinutes),
             SigningCredentials = _signingCredentials
         };
 
