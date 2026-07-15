@@ -1,4 +1,5 @@
 using System.Text;
+using IdentityHub.Application.Common.Options;
 using IdentityHub.Infrastructure.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -12,16 +13,26 @@ public sealed class TokenServiceTests
     private const string Audience = "IdentityHub.Client";
     private const string Secret = "this-is-a-long-test-secret-with-more-than-32-bytes";
 
-    private static TokenService CreateSut(int accessTokenLifetimeMinutes = 15)
+    private static TokenService CreateSut(
+        int accessTokenLifetimeMinutes = 15,
+        int refreshTokenLifetimeDays = 7)
     {
-        var options = Options.Create(new JwtOptions
+        var jwtOptions = Options.Create(new JwtOptions
         {
             Issuer = Issuer,
             Audience = Audience,
-            Secret = Secret,
-            AccessTokenLifetimeMinutes = accessTokenLifetimeMinutes
+            Secret = Secret
         });
-        return new TokenService(options);
+
+        var authenticationOptions = Options.Create(new AuthenticationOptions
+        {
+            AccessTokenLifetimeMinutes = accessTokenLifetimeMinutes,
+            RefreshTokenLifetimeDays = refreshTokenLifetimeDays
+        });
+
+        return new TokenService(
+            jwtOptions,
+            authenticationOptions);
     }
 
     [Fact]

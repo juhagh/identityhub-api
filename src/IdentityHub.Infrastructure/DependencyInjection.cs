@@ -1,6 +1,7 @@
 using IdentityHub.Application.Common.Interfaces;
 using IdentityHub.Infrastructure.Identity;
 using IdentityHub.Infrastructure.Persistence;
+using IdentityHub.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,6 +44,7 @@ public static class DependencyInjection
             .ValidateOnStart();
 
         services.AddScoped<ITokenService, TokenService>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         
         return services;
 
