@@ -68,6 +68,18 @@ internal sealed class IdentityService : IIdentityService
         return roleList.AsReadOnly();
     }
 
+   public async Task<Result<string>> GetEmailAsync(Guid userId)
+     {
+         var user = await _userManager.FindByIdAsync(userId.ToString());
+         if (user is null)
+             return Result<string>.Failure(UserErrors.UserNotFound);
+         
+         if (string.IsNullOrWhiteSpace(user.Email))
+             return Result<string>.Failure(UserErrors.EmailNotConfigured);
+         
+        return Result<string>.Success(user.Email);
+     } 
+
     public async Task<Result> DeleteUserAsync(Guid userId)
     {
         var user = await _userManager.FindByIdAsync(userId.ToString());

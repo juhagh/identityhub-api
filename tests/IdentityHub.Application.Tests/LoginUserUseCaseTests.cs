@@ -16,11 +16,20 @@ public sealed class LoginUserUseCaseTests
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly LoginUserUseCase _sut;
     
+    private static readonly DateTimeOffset FixedUtcNow =
+        new(2026, 7, 21, 12, 0, 0, TimeSpan.Zero);
+    
     public LoginUserUseCaseTests()
     {
         _identityService = Substitute.For<IIdentityService>();
         _tokenService = Substitute.For<ITokenService>();
         _refreshTokenRepository = Substitute.For<IRefreshTokenRepository>();
+        
+        var timeProvider = Substitute.For<TimeProvider>();
+        
+        timeProvider
+            .GetUtcNow()
+            .Returns(FixedUtcNow);
         
         var options = Options.Create(new AuthenticationOptions
         {
@@ -32,6 +41,7 @@ public sealed class LoginUserUseCaseTests
             _identityService,
             _tokenService,
             _refreshTokenRepository,
+            timeProvider,
             options);
     }
 

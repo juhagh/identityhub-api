@@ -4,6 +4,7 @@ using IdentityHub.Infrastructure.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
+using NSubstitute;
 
 namespace IdentityHub.Infrastructure.Tests;
 
@@ -12,11 +13,21 @@ public sealed class TokenServiceTests
     private const string Issuer = "IdentityHub.Tests";
     private const string Audience = "IdentityHub.Client";
     private const string Secret = "this-is-a-long-test-secret-with-more-than-32-bytes";
+    
+    private static readonly DateTimeOffset FixedUtcNow =
+        new(2026, 7, 21, 12, 0, 0, TimeSpan.Zero);
 
     private static TokenService CreateSut(
         int accessTokenLifetimeMinutes = 15,
-        int refreshTokenLifetimeDays = 7)
+        int refreshTokenLifetimeDays = 7,
+        DateTimeOffset? utcNow = null)
     {
+        var timeProvider = Substitute.For<TimeProvider>();
+        
+        timeProvider
+            .GetUtcNow()
+            .Returns(utcNow ?? FixedUtcNow);
+        
         var jwtOptions = Options.Create(new JwtOptions
         {
             Issuer = Issuer,
@@ -32,11 +43,12 @@ public sealed class TokenServiceTests
 
         return new TokenService(
             jwtOptions,
-            authenticationOptions);
+            authenticationOptions,
+            timeProvider);
     }
 
     [Fact]
-    public void CreateAccessToken_Should_Return_Claims_And_Roles()
+    public void CreateAccessToken_ShouldReturnClaimsAndRoles()
     {
         var sut = CreateSut();
         var userId = Guid.NewGuid();
@@ -60,7 +72,7 @@ public sealed class TokenServiceTests
     }
     
     [Fact]
-    public async Task CreateAccessToken_ShouldReturnValidToken()
+    public async Task CreateAccessToken_ShouldReturnTokenWithValidIssuerAudienceAndSignature()
     {
         var sut = CreateSut();
         var token = sut.CreateAccessToken(
@@ -77,8 +89,10 @@ public sealed class TokenServiceTests
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(Secret)),
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero
+            // Lifetime validation is disabled because the token uses a fixed test clock,
+            // while ValidateTokenAsync validates against the real system clock.
+            // CreateAccessToken_ShouldSetCustomTokenExpiry verifies expiry separately.
+            ValidateLifetime = false,
         };
 
         var result = await new JsonWebTokenHandler()
@@ -104,6 +118,9 @@ public sealed class TokenServiceTests
     public void CreateAccessToken_ShouldSetCustomTokenExpiry()
     {
         var sut = CreateSut(5);
+        
+        var utcNow = FixedUtcNow.UtcDateTime;
+        
         var userId = Guid.NewGuid();
         var email = "user@example.com";
         var roles = new [] {"Admin", "User"};
@@ -112,7 +129,7 @@ public sealed class TokenServiceTests
         var parsedToken = new JsonWebTokenHandler()
             .ReadJsonWebToken(token);
         
-        var expectedExpiry = DateTime.UtcNow.AddMinutes(5);
-        Assert.InRange(parsedToken.ValidTo, expectedExpiry.AddSeconds(-30), expectedExpiry.AddSeconds(30));
+        var expectedExpiry = utcNow.AddMinutes(5);
+        Assert.Equal(expectedExpiry, parsedToken.ValidTo);
     }
 }
