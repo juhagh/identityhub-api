@@ -1,5 +1,6 @@
 using IdentityHub.Application.Common.Options;
 using IdentityHub.Application.Features.Login;
+using IdentityHub.Application.Features.RefreshTokens;
 using IdentityHub.Application.Features.Register;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,6 +13,7 @@ public static class DependencyInjection
     {
         services.AddScoped<RegisterUserUseCase>();
         services.AddScoped<LoginUserUseCase>();
+        services.AddScoped<RefreshTokenUseCase>();
         
         services.AddOptions<AuthenticationOptions>()
             .BindConfiguration(AuthenticationOptions.SectionName)

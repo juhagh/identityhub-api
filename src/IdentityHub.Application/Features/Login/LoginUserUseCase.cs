@@ -1,4 +1,5 @@
 using IdentityHub.Application.Common.Interfaces;
+using IdentityHub.Application.Common.Models;
 using IdentityHub.Application.Common.Options;
 using IdentityHub.Application.Common.Results;
 using IdentityHub.Domain.Entities;
@@ -11,34 +12,40 @@ public sealed class LoginUserUseCase
     private readonly IIdentityService _identityService;
     private readonly ITokenService _tokenService;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly TimeProvider _timeProvider;
     private readonly AuthenticationOptions _authenticationOptions;
 
     public LoginUserUseCase(IIdentityService identityService, 
         ITokenService tokenService, 
-        IRefreshTokenRepository refreshTokenRepository, 
+        IRefreshTokenRepository refreshTokenRepository,
+        TimeProvider timeProvider,
         IOptions<AuthenticationOptions> options)
     {
         _identityService = identityService;
         _tokenService = tokenService;
         _refreshTokenRepository = refreshTokenRepository;
+        _timeProvider = timeProvider;
         _authenticationOptions = options.Value;
     }
 
-    public async Task<Result<LoginResult>> LoginAsync(string email, string password, CancellationToken ct)
+    public async Task<Result<AuthenticationResult>> LoginAsync(string email, string password, CancellationToken ct)
     {
+        var utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        
         var credentialsResult = await _identityService.ValidateCredentialsAsync(email, password);
         if (credentialsResult.IsFailure)
-            return Result<LoginResult>.Failure(credentialsResult.Errors);
+            return Result<AuthenticationResult>.Failure(credentialsResult.Errors);
         
         var userId = credentialsResult.Value;
         var roles = await _identityService.GetRolesAsync(userId);
-        // Short‑lived access tokens (default 15 min, see AuthenticationOptions)
         var accessToken = _tokenService.CreateAccessToken(userId, email, roles);
         var refreshTokenValue = _tokenService.GenerateRefreshTokenValue();
         
         var refreshTokenLifetimeDays = _authenticationOptions.RefreshTokenLifetimeDays;
-        var refreshTokenExpiry = DateTime.UtcNow.AddDays(refreshTokenLifetimeDays);
-        var refreshToken = RefreshToken.Issue(userId, refreshTokenValue, refreshTokenExpiry);
+        var refreshTokenExpiry = utcNow.AddDays(refreshTokenLifetimeDays);
+        var sessionStartTime = utcNow;
+        var issuedAt = utcNow;
+        var refreshToken = RefreshToken.Issue(userId, refreshTokenValue, refreshTokenExpiry, sessionStartTime, issuedAt);
         
         await _refreshTokenRepository.AddAsync(refreshToken, ct);
         await _refreshTokenRepository.SaveChangesAsync(ct);
@@ -47,7 +54,7 @@ public sealed class LoginUserUseCase
         var accessTokenLifetimeMinutes = _authenticationOptions.AccessTokenLifetimeMinutes;
         var accessTokenLifetime = TimeSpan.FromMinutes(accessTokenLifetimeMinutes);
 
-        var loginResult = new LoginResult
+        var loginResult = new AuthenticationResult
         (
              AccessToken: accessToken,
              RefreshToken: refreshToken.Token,
@@ -55,7 +62,7 @@ public sealed class LoginUserUseCase
              RefreshTokenExpiresIn: (long)refreshTokenLifetime.TotalSeconds
         );
 
-        return Result<LoginResult>.Success(loginResult);
+        return Result<AuthenticationResult>.Success(loginResult);
     }
     
 }

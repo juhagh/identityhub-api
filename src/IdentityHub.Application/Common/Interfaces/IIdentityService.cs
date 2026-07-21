@@ -9,4 +9,5 @@ public interface IIdentityService
     Task<Result> AddToRoleAsync(Guid userId, string role);
     Task<Result> DeleteUserAsync(Guid userId);
     Task<IReadOnlyList<string>> GetRolesAsync(Guid userId);
+    Task<Result<string>> GetEmailAsync(Guid userId);
 }

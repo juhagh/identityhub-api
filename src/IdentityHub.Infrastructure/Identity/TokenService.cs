@@ -16,12 +16,18 @@ internal sealed class TokenService : ITokenService
     private readonly JwtOptions _jwtOptions;
     private readonly AuthenticationOptions _authenticationOptions;
     private readonly SigningCredentials _signingCredentials;
+    private readonly TimeProvider _timeProvider;
+    
     private static readonly JsonWebTokenHandler Handler = new();
     
-    public TokenService(IOptions<JwtOptions> jwtOptions, IOptions<AuthenticationOptions> authenticationOptions)
+    public TokenService(
+        IOptions<JwtOptions> jwtOptions, 
+        IOptions<AuthenticationOptions> authenticationOptions, 
+        TimeProvider timeProvider)
     {
         _jwtOptions = jwtOptions.Value;
         _authenticationOptions = authenticationOptions.Value;
+        _timeProvider = timeProvider;
         _signingCredentials = new SigningCredentials(
             new SymmetricSecurityKey(
                 Encoding.UTF8.GetBytes(_jwtOptions.Secret)),
@@ -30,6 +36,8 @@ internal sealed class TokenService : ITokenService
 
     public string CreateAccessToken(Guid userId, string email, IReadOnlyList<string> roles)
     {
+        var utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        
         var claims = new List<Claim>
         {
             new (JwtRegisteredClaimNames.Sub, userId.ToString()),
@@ -44,7 +52,7 @@ internal sealed class TokenService : ITokenService
             Subject = new ClaimsIdentity(claims),
             Issuer = _jwtOptions.Issuer,
             Audience = _jwtOptions.Audience,
-            Expires = DateTime.UtcNow.AddMinutes(_authenticationOptions.AccessTokenLifetimeMinutes),
+            Expires = utcNow.AddMinutes(_authenticationOptions.AccessTokenLifetimeMinutes),
             SigningCredentials = _signingCredentials
         };
 
