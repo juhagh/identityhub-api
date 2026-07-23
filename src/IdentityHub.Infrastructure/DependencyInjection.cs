@@ -5,6 +5,7 @@ using IdentityHub.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace IdentityHub.Infrastructure;
 
@@ -45,6 +46,8 @@ public static class DependencyInjection
 
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        
+        services.TryAddSingleton(TimeProvider.System);
         
         return services;
 

@@ -1,6 +1,192 @@
-@IdentityHub.API_HostAddress = http://localhost:5022
+### IdentityHub API requests
 
-GET {{IdentityHub.API_HostAddress}}/weatherforecast/
-Accept: application/json
+### Variables available after successful login:
+### {{accessToken}}
+### {{refreshToken}}
+### {{accessTokenExpiresIn}}
+### {{refreshTokenExpiresIn}}
+
+
+### FAIL: Registration password does not meet requirements
+POST {{hostAddress}}/auth/register
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "email": "{{email}}",
+  "password": "{{weakPassword}}"
+}
+
+> {%
+    client.test("Registration fails validation", function () {
+        client.assert(
+            response.status === 400,
+            "Expected 400 Bad Request"
+        );
+    });
+%}
 
 ###
+
+### SUCCESS: Register user
+### Run again to test duplicate-email handling
+< {%
+    const email = `test-${$random.uuid}@example.com`;
+    client.global.set("generatedEmail", email);
+    client.log("Using email: " + email);
+%}
+
+POST {{hostAddress}}/auth/register
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "{{generatedEmail}}",
+  "password": "{{password}}"
+}
+
+> {%
+    client.test("User registration succeeds", function () {
+        client.assert(
+            response.status === 201,
+            "Expected 201 Created"
+        );
+
+        client.assert(
+            response.body.userId,
+            "Expected response to contain userId"
+        );
+    });
+
+    if (response.status === 201) {
+        client.global.set("userId", response.body.userId);
+        client.log("Stored userId: " + response.body.userId);
+    }
+%}
+
+###
+
+### FAIL: Login with invalid password
+POST {{hostAddress}}/auth/login
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "email": "{{email}}",
+  "password": "{{wrongPassword}}"
+}
+
+> {%
+    client.test("Invalid login is rejected", function () {
+        client.assert(
+            response.status === 401,
+            "Expected 401 Unauthorized"
+        );
+    });
+%}
+
+###
+
+### SUCCESS: Login and store tokens
+POST {{hostAddress}}/auth/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "{{generatedEmail}}",
+  "password": "{{password}}"
+}
+
+> {%
+    client.test("Login succeeds", function () {
+        client.assert(
+            response.status === 200,
+            "Expected 200 OK"
+        );
+
+        client.assert(
+            response.body.accessToken,
+            "Expected response to contain accessToken"
+        );
+
+        client.assert(
+            response.body.refreshToken,
+            "Expected response to contain refreshToken"
+        );
+    });
+
+    if (response.status === 200) {
+        client.global.set(
+            "accessToken",
+            response.body.accessToken
+        );
+
+        client.global.set(
+            "refreshToken",
+            response.body.refreshToken
+        );
+
+        client.global.set(
+            "accessTokenExpiresIn",
+            response.body.accessTokenExpiresIn
+        );
+
+        client.global.set(
+            "refreshTokenExpiresIn",
+            response.body.refreshTokenExpiresIn
+        );
+
+        client.log("Authentication tokens stored successfully.");
+    }
+%}
+
+###
+
+### Example: Call a protected endpoint
+### Uncomment or replace when implemented
+# GET {{hostAddress}}/users/me
+# Accept: application/json
+# Authorization: Bearer {{accessToken}}
+
+###
+
+### Example: Refresh authentication tokens
+### Uncomment when the refresh endpoint exists
+# POST {{hostAddress}}/auth/refresh
+# Content-Type: application/json
+# Accept: application/json
+#
+# {
+#   "refreshToken": "{{refreshToken}}"
+# }
+#
+# > {%
+#     client.test("Token refresh succeeds", function () {
+#         client.assert(
+#             response.status === 200,
+#             "Expected 200 OK"
+#         );
+#     });
+#
+#     if (response.status === 200) {
+#         client.global.set(
+#             "accessToken",
+#             response.body.accessToken
+#         );
+#
+#         client.global.set(
+#             "refreshToken",
+#             response.body.refreshToken
+#         );
+#
+#         client.global.set(
+#             "accessTokenExpiresIn",
+#             response.body.accessTokenExpiresIn
+#         );
+#
+#         client.global.set(
+#             "refreshTokenExpiresIn",
+#             response.body.refreshTokenExpiresIn
+#         );
+#     }
+# %}

@@ -3,6 +3,7 @@ using IdentityHub.Application.Features.Login;
 using IdentityHub.Application.Features.RefreshTokens;
 using IdentityHub.Application.Features.Register;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace IdentityHub.Application;
 
@@ -19,6 +20,8 @@ public static class DependencyInjection
             .BindConfiguration(AuthenticationOptions.SectionName)
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        
+        services.TryAddSingleton(TimeProvider.System);
         
         return services;
     }
