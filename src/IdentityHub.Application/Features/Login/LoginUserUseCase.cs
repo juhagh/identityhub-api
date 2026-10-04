@@ -43,9 +43,13 @@ public sealed class LoginUserUseCase
         
         var refreshTokenLifetimeDays = _authenticationOptions.RefreshTokenLifetimeDays;
         var refreshTokenExpiry = utcNow.AddDays(refreshTokenLifetimeDays);
-        var sessionStartTime = utcNow;
-        var issuedAt = utcNow;
-        var refreshToken = RefreshToken.Issue(userId, refreshTokenValue, refreshTokenExpiry, sessionStartTime, issuedAt);
+        
+        var refreshToken = RefreshToken.Issue(
+            userId: userId,
+            refreshTokenValue: refreshTokenValue,
+            expiresAt: refreshTokenExpiry,
+            sessionStartedAt: utcNow,
+            issuedAt: utcNow);
         
         await _refreshTokenRepository.AddAsync(refreshToken, ct);
         await _refreshTokenRepository.SaveChangesAsync(ct);
@@ -58,8 +62,8 @@ public sealed class LoginUserUseCase
         (
              AccessToken: accessToken,
              RefreshToken: refreshToken.Token,
-             AccessTokenExpiresIn: (long)accessTokenLifetime.TotalSeconds,
-             RefreshTokenExpiresIn: (long)refreshTokenLifetime.TotalSeconds
+             AccessTokenExpiresInSeconds: (long)accessTokenLifetime.TotalSeconds,
+             RefreshTokenExpiresInSeconds: (long)refreshTokenLifetime.TotalSeconds
         );
 
         return Result<AuthenticationResult>.Success(loginResult);

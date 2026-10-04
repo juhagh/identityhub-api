@@ -38,16 +38,6 @@ public sealed class RefreshTokenUseCase
         if (refreshToken is null)
             return Result<AuthenticationResult>.Failure(TokenErrors.InvalidRefreshToken);
         
-        var slidingExpiry = utcNow.AddDays(_authenticationOptions.RefreshTokenLifetimeDays);
-        var absoluteExpiry = refreshToken.SessionStartedAt.AddDays(_authenticationOptions.AbsoluteRefreshTokenLifetimeDays);
-        
-        var expiresAt = slidingExpiry < absoluteExpiry
-            ? slidingExpiry
-            : absoluteExpiry;
-        
-        if (expiresAt <= utcNow)
-            return Result<AuthenticationResult>.Failure(TokenErrors.InvalidRefreshToken);
-        
         // Reuse detected
         if (refreshToken.IsRevoked)
         {
@@ -65,7 +55,17 @@ public sealed class RefreshTokenUseCase
 
             return Result<AuthenticationResult>.Failure(TokenErrors.InvalidRefreshToken);
         }
-
+        
+        var slidingExpiry = utcNow.AddDays(_authenticationOptions.RefreshTokenLifetimeDays);
+        var absoluteExpiry = refreshToken.SessionStartedAt.AddDays(_authenticationOptions.AbsoluteRefreshTokenLifetimeDays);
+        
+        var expiresAt = slidingExpiry < absoluteExpiry
+            ? slidingExpiry
+            : absoluteExpiry;
+        
+        if (expiresAt <= utcNow)
+            return Result<AuthenticationResult>.Failure(TokenErrors.InvalidRefreshToken);
+        
         if (refreshToken.IsExpiredAt(utcNow))
         {
             return Result<AuthenticationResult>.Failure(TokenErrors.InvalidRefreshToken);
@@ -96,7 +96,7 @@ public sealed class RefreshTokenUseCase
 
         refreshToken.Revoke(
             revokedAt: utcNow, 
-            newRefreshToken.Token);
+            replacedByToken: newRefreshToken.Token);
         
         await _refreshTokenRepository.AddAsync(newRefreshToken, ct);
         await _refreshTokenRepository.SaveChangesAsync(ct);
@@ -105,8 +105,8 @@ public sealed class RefreshTokenUseCase
         (
             AccessToken: newAccessToken,
             RefreshToken: newRefreshToken.Token,
-            AccessTokenExpiresIn: accessTokenExpiresIn,
-            RefreshTokenExpiresIn: refreshTokenExpiresIn
+            AccessTokenExpiresInSeconds: accessTokenExpiresIn,
+            RefreshTokenExpiresInSeconds: refreshTokenExpiresIn
         ));
     }
 }

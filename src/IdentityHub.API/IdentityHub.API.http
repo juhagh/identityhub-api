@@ -127,13 +127,13 @@ Accept: application/json
         );
 
         client.global.set(
-            "accessTokenExpiresIn",
-            response.body.accessTokenExpiresIn
+            "accessTokenExpiresInSeconds",
+            response.body.accessTokenExpiresInSeconds
         );
 
         client.global.set(
-            "refreshTokenExpiresIn",
-            response.body.refreshTokenExpiresIn
+            "refreshTokenExpiresInSeconds",
+            response.body.refreshTokenExpiresInSeconds
         );
 
         client.log("Authentication tokens stored successfully.");
@@ -144,49 +144,60 @@ Accept: application/json
 
 ### Example: Call a protected endpoint
 ### Uncomment or replace when implemented
-# GET {{hostAddress}}/users/me
-# Accept: application/json
-# Authorization: Bearer {{accessToken}}
+GET {{hostAddress}}/users/me
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+#Authorization: Bearer "juha-trying-to-hack-the-system"
 
 ###
 
 ### Example: Refresh authentication tokens
 ### Uncomment when the refresh endpoint exists
-# POST {{hostAddress}}/auth/refresh
-# Content-Type: application/json
-# Accept: application/json
-#
-# {
-#   "refreshToken": "{{refreshToken}}"
-# }
-#
-# > {%
-#     client.test("Token refresh succeeds", function () {
-#         client.assert(
-#             response.status === 200,
-#             "Expected 200 OK"
-#         );
-#     });
-#
-#     if (response.status === 200) {
-#         client.global.set(
-#             "accessToken",
-#             response.body.accessToken
-#         );
-#
-#         client.global.set(
-#             "refreshToken",
-#             response.body.refreshToken
-#         );
-#
-#         client.global.set(
-#             "accessTokenExpiresIn",
-#             response.body.accessTokenExpiresIn
-#         );
-#
-#         client.global.set(
-#             "refreshTokenExpiresIn",
-#             response.body.refreshTokenExpiresIn
-#         );
-#     }
-# %}
+POST {{hostAddress}}/auth/refresh
+Content-Type: application/json
+Accept: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+> {%
+    client.test("Token refresh succeeds", function () {
+        client.assert(
+            response.status === 200,
+            "Expected 200 OK"
+        );
+    });
+    if (response.status === 200) {
+        client.global.set(
+            "accessToken",
+            response.body.accessToken
+        );
+        client.global.set(
+            "oldRefreshToken",
+            client.global.get("refreshToken")
+        )
+        client.global.set(
+            "refreshToken",
+            response.body.refreshToken
+        );
+        client.global.set(
+            "accessTokenExpiresInSeconds",
+            response.body.accessTokenExpiresInSeconds
+        );
+        client.global.set(
+            "refreshTokenExpiresInSeconds",
+            response.body.refreshTokenExpiresInSeconds
+        );
+    }
+%}
+
+###
+
+### Fail?
+POST {{hostAddress}}/auth/refresh
+Content-Type: application/json
+Accept: application/json
+
+{
+  "refreshToken": "{{oldRefreshToken}}"
+}

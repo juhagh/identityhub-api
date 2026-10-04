@@ -1,5 +1,5 @@
-using IdentityHub.Application.Common.Models;
 using IdentityHub.Application.Features.Login;
+using IdentityHub.Application.Features.RefreshTokens;
 using IdentityHub.Application.Features.Register;
 using Microsoft.AspNetCore.Http.HttpResults;
 
@@ -12,6 +12,7 @@ public static class AuthEndpoints
         var group = app.MapGroup("/auth");
         group.MapPost("/register", RegisterAsync);
         group.MapPost("/login", LoginAsync);
+        group.MapPost("/refresh", RefreshAsync);
         return app;
     }
 
@@ -25,18 +26,23 @@ public static class AuthEndpoints
         return TypedResults.Created((string?)null, new RegisterResponse(result.Value));
     }
 
-    private static async Task<Results<Ok<LoginResponse>, ProblemHttpResult>> LoginAsync(
+    private static async Task<Results<Ok<TokenResponse>, ProblemHttpResult>> LoginAsync(
         LoginRequest request, LoginUserUseCase useCase, CancellationToken ct)
     {
         var result = await useCase.LoginAsync(request.Email, request.Password, ct);
         if (result.IsFailure)
             return result.ToProblem(StatusCodes.Status401Unauthorized);
 
-        return TypedResults.Ok(
-            new LoginResponse(
-                AccessToken: result.Value.AccessToken,
-                RefreshToken: result.Value.RefreshToken,
-                AccessTokenExpiresIn: result.Value.AccessTokenExpiresIn,
-                RefreshTokenExpiresIn: result.Value.RefreshTokenExpiresIn));
+        return TypedResults.Ok(TokenResponse.From(result.Value));
+    }
+
+    private static async Task<Results<Ok<TokenResponse>, ProblemHttpResult>> RefreshAsync(
+        RefreshRequest request, RefreshTokenUseCase useCase, CancellationToken ct)
+    {
+        var result = await useCase.HandleAsync(request.RefreshToken, ct);
+        if (result.IsFailure)
+            return result.ToProblem(StatusCodes.Status401Unauthorized);
+
+        return TypedResults.Ok(TokenResponse.From(result.Value));
     }
 }

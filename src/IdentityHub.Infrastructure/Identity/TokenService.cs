@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using IdentityHub.Application.Common.Interfaces;
 using IdentityHub.Application.Common.Options;
+using IdentityHub.Application.Common.Security;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -11,8 +12,6 @@ namespace IdentityHub.Infrastructure.Identity;
 
 internal sealed class TokenService : ITokenService
 {
-    internal const string RoleClaimType = "role";
-    
     private readonly JwtOptions _jwtOptions;
     private readonly AuthenticationOptions _authenticationOptions;
     private readonly SigningCredentials _signingCredentials;
@@ -45,7 +44,7 @@ internal sealed class TokenService : ITokenService
             new (JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
         
-        claims.AddRange(roles.Select(role => new Claim(RoleClaimType, role)));
+        claims.AddRange(roles.Select(role => new Claim(JwtClaimTypes.Role, role)));
         
         var tokenDescriptor = new SecurityTokenDescriptor
         {

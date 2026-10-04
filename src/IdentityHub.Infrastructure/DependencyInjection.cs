@@ -2,6 +2,7 @@ using IdentityHub.Application.Common.Interfaces;
 using IdentityHub.Infrastructure.Identity;
 using IdentityHub.Infrastructure.Persistence;
 using IdentityHub.Infrastructure.Persistence.Repositories;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,6 +44,14 @@ public static class DependencyInjection
             .BindConfiguration(JwtOptions.SectionName)
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        
+        services.ConfigureOptions<ConfigureJwtBearerOptions>();
+        
+        services
+            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer();
+        
+        services.AddAuthorization();
 
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();

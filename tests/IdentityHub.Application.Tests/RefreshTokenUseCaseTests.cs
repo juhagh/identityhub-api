@@ -115,10 +115,10 @@ public sealed class RefreshTokenUseCaseTests
         Assert.Equal(newRefreshTokenValue, result.Value.RefreshToken);
         Assert.Equal(
             (long)TimeSpan.FromDays(7).TotalSeconds,
-            result.Value.RefreshTokenExpiresIn);
+            result.Value.RefreshTokenExpiresInSeconds);
         Assert.Equal(
             (long)TimeSpan.FromMinutes(15).TotalSeconds,
-            result.Value.AccessTokenExpiresIn);
+            result.Value.AccessTokenExpiresInSeconds);
         
         // Assert: old token was rotated
         Assert.True(oldRefreshToken.IsRevoked);
@@ -399,5 +399,106 @@ public sealed class RefreshTokenUseCaseTests
             .DidNotReceive()
             .SaveChangesAsync(
                 Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldRevokeAllActiveTokens_WhenRefreshTokenReuseIsDetected()
+    {
+        // Arrange
+        var utcNow = FixedUtcNow.UtcDateTime;
+
+        var sessionStartedAt = utcNow.AddDays(-2);
+        var revokedAt = utcNow;
+
+        var userId = Guid.NewGuid();
+
+        var revokedRefreshTokenValue = "revoked-refresh-token-value";
+        var firstActiveRefreshTokenValue = "first-active-refresh-token-value";
+        var secondActiveRefreshTokenValue = "second-active-refresh-token-value";
+
+        var revokedRefreshToken = RefreshToken.Issue(
+            userId: userId,
+            refreshTokenValue: revokedRefreshTokenValue,
+            expiresAt: utcNow.AddDays(7),
+            sessionStartedAt: sessionStartedAt,
+            issuedAt: utcNow);
+
+        revokedRefreshToken.Revoke(
+            revokedAt: revokedAt,
+            replacedByToken: firstActiveRefreshTokenValue);
+
+        var firstRefreshToken = RefreshToken.Issue(
+            userId: userId,
+            refreshTokenValue: firstActiveRefreshTokenValue,
+            expiresAt: utcNow.AddDays(7),
+            sessionStartedAt: sessionStartedAt,
+            issuedAt: utcNow);
+
+        var secondRefreshToken = RefreshToken.Issue(
+            userId: userId,
+            refreshTokenValue: secondActiveRefreshTokenValue,
+            expiresAt: utcNow.AddDays(7),
+            sessionStartedAt: utcNow.AddDays(-1),
+            issuedAt: utcNow);
+
+        IReadOnlyList<RefreshToken> activeRefreshTokens =
+        [
+            firstRefreshToken,
+            secondRefreshToken
+        ];
+
+        _refreshTokenRepository
+            .GetByTokenAsync(
+                revokedRefreshTokenValue,
+                Arg.Any<CancellationToken>())
+            .Returns(revokedRefreshToken);
+
+        _refreshTokenRepository
+            .GetActiveByUserIdAsync(
+                userId,
+                utcNow,
+                Arg.Any<CancellationToken>())
+            .Returns(activeRefreshTokens);
+
+        // Act
+        var result = await _sut.HandleAsync(
+            revokedRefreshTokenValue,
+            CancellationToken.None);
+
+        // Assert: returned result
+        Assert.True(result.IsFailure);
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(TokenErrors.InvalidRefreshToken, error);
+
+        Assert.All(
+            activeRefreshTokens,
+            token => Assert.True(token.IsRevoked));
+
+        await _refreshTokenRepository
+            .Received(1)
+            .GetActiveByUserIdAsync(
+                userId,
+                utcNow,
+                Arg.Any<CancellationToken>());
+
+        await _refreshTokenRepository
+            .DidNotReceive()
+            .AddAsync(
+                Arg.Any<RefreshToken>(),
+                Arg.Any<CancellationToken>());
+
+        await _refreshTokenRepository
+            .Received(1)
+            .SaveChangesAsync(
+                Arg.Any<CancellationToken>());
+
+        await _identityService
+            .DidNotReceive()
+            .GetEmailAsync(Arg.Any<Guid>());
+
+        _tokenService
+            .DidNotReceive()
+            .GenerateRefreshTokenValue();
     }
 }

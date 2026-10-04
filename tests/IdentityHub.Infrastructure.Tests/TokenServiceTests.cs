@@ -1,5 +1,6 @@
 using System.Text;
 using IdentityHub.Application.Common.Options;
+using IdentityHub.Application.Common.Security;
 using IdentityHub.Infrastructure.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -63,7 +64,7 @@ public sealed class TokenServiceTests
         Assert.Equal(email, parsedToken.GetClaim(JwtRegisteredClaimNames.Email).Value);
         
         var roleClaims = parsedToken.Claims
-            .Where(c => c.Type == TokenService.RoleClaimType)
+            .Where(c => c.Type == JwtClaimTypes.Role)
             .Select(c => c.Value)
             .ToList();
 
