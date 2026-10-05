@@ -2,7 +2,6 @@ using System.Security.Claims;
 using IdentityHub.API.Common.Extensions;
 using IdentityHub.Application.Common.Security;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace IdentityHub.API.Endpoints.Users;
 
