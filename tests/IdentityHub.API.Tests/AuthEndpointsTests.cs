@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using IdentityHub.API.Endpoints.Auth;
 using IdentityHub.API.Tests.Helpers;
@@ -284,5 +285,90 @@ public sealed class AuthEndpointsTests
             requestPayload);
 
         Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task LogoutAll_WithoutAccessToken_ShouldReturnUnauthorized()
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Post, 
+            "auth/logout-all");
+        
+        var response = await _client.SendAsync(request);
+        
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LogoutAll_WithValidAccessToken_ShouldRevokeAllRefreshTokens()
+    {
+        // Register new test user
+        var email = $"user-{Guid.NewGuid()}@test.com";
+        var registerPayload = new { email, password = AuthTestHelper.TestPassword };
+        
+        var registerResponse = await _client.PostAsJsonAsync(
+            "auth/register",
+            registerPayload);
+
+        Assert.Equal(HttpStatusCode.Created, registerResponse.StatusCode);
+        
+        // Login to get the first token
+        var firstLoginPayload = new { email, password = AuthTestHelper.TestPassword };
+        var firstLoginResponse = await _client.PostAsJsonAsync(
+            "auth/login",
+            firstLoginPayload);
+        Assert.Equal(HttpStatusCode.OK, firstLoginResponse.StatusCode);
+        
+        // Login to get the second token
+        var secondLoginPayload = new { email, password = AuthTestHelper.TestPassword };
+        var secondLoginResponse = await _client.PostAsJsonAsync(
+            "auth/login",
+            secondLoginPayload);
+        Assert.Equal(HttpStatusCode.OK, secondLoginResponse.StatusCode);
+        
+        // Get token data for both logins
+        var firstLoginTokenData = await firstLoginResponse.Content.ReadFromJsonAsync<TokenResponse>();
+        Assert.NotNull(firstLoginTokenData);
+        var secondLoginTokenData = await secondLoginResponse.Content.ReadFromJsonAsync<TokenResponse>();
+        Assert.NotNull(secondLoginTokenData);
+        Assert.NotEqual(
+            firstLoginTokenData.RefreshToken,
+            secondLoginTokenData.RefreshToken);
+        
+        // Logout all sessions
+        var request = new HttpRequestMessage(
+            HttpMethod.Post, 
+            "auth/logout-all");
+        
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", firstLoginTokenData.AccessToken);
+        
+        var logoutAllResponse = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.NoContent, logoutAllResponse.StatusCode);
+ 
+        
+        var firstRefreshPayload = new
+        {
+            refreshToken = firstLoginTokenData.RefreshToken
+        };
+
+        var secondRefreshPayload = new
+        {
+            refreshToken = secondLoginTokenData.RefreshToken
+        };
+        
+        // Try refresh with refreshToken from first login
+        var firstRefreshResponse = await _client.PostAsJsonAsync(
+            "auth/refresh",
+            firstRefreshPayload);
+        
+        Assert.Equal(HttpStatusCode.Unauthorized, firstRefreshResponse.StatusCode);
+
+        // Try refresh with refreshToken from second login
+        var secondRefreshResponse = await _client.PostAsJsonAsync(
+            "auth/refresh",
+            secondRefreshPayload);
+        
+        Assert.Equal(HttpStatusCode.Unauthorized, secondRefreshResponse.StatusCode);
+
     }
 }
