@@ -90,6 +90,26 @@ public sealed class AuthEndpointsTests
         
         Assert.Equal(HttpStatusCode.Unauthorized, replacementResponse.StatusCode);
     }
+    
+    [Fact]
+    public async Task Refresh_WithInvalidRefreshToken_ShouldReturnUnauthorizedWithInvalidRefreshTokenError()
+    {
+        var refreshPayload = new { refreshToken = "invalid-refresh-token" };
+        var refreshResponse = await _client.PostAsJsonAsync(
+            "auth/refresh",
+            refreshPayload);
+        
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
+        
+        var problem =
+            await refreshResponse.Content.ReadFromJsonAsync<AuthTestHelper.ApiProblemDetails>();
+        
+        Assert.NotNull(problem);
+        Assert.Equal(401, problem.Status);
+        Assert.Contains(
+            "Tokens.InvalidRefreshToken",
+            problem.ErrorCodes);
+    }
 
     [Fact]
     public async Task Login_WithInvalidPassword_ShouldReturnUnauthorizedWithInvalidCredentialsError()
@@ -141,6 +161,34 @@ public sealed class AuthEndpointsTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, loginResponse.StatusCode);
     }
+    
+    [Fact]
+    public async Task Login_WithValidCredentials_ShouldReturnTokenPair()
+    {
+        // Register test user
+        var email = $"user-{Guid.NewGuid()}@test.com";
+        var registerPayload = new { email = email, password = AuthTestHelper.TestPassword };
+        
+        var registerResponse = await _client.PostAsJsonAsync(
+            "auth/register",
+            registerPayload);
+
+        Assert.Equal(HttpStatusCode.Created, registerResponse.StatusCode);
+        
+        // Login to get the token pair
+        var loginPayload = new { email = email, password = AuthTestHelper.TestPassword };
+
+        var loginResponse = await _client.PostAsJsonAsync(
+            "auth/login",
+            loginPayload);
+
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var loginTokenData = await loginResponse.Content.ReadFromJsonAsync<TokenResponse>();
+        Assert.NotNull(loginTokenData);
+        Assert.False(string.IsNullOrWhiteSpace(loginTokenData.AccessToken));
+        Assert.False(string.IsNullOrWhiteSpace(loginTokenData.RefreshToken));
+    }
 
     [Fact]
     public async Task Register_WithValidCredentials_ShouldReturnCreated()
@@ -188,50 +236,53 @@ public sealed class AuthEndpointsTests
     }
 
     [Fact]
-    public async Task Login_WithValidCredentials_ShouldReturnTokenPair()
+    public async Task Logout_WithValidRefreshToken_ShouldRevokeRefreshToken()
     {
-        // Register test user
-        var email = $"user-{Guid.NewGuid()}@test.com";
-        var registerPayload = new { email = email, password = AuthTestHelper.TestPassword };
+        var user = await AuthTestHelper.CreateAuthenticatedUserAsync(_client);
+
+        var requestPayload = new { refreshToken = user.RefreshToken };
+        var logoutResponse = await _client.PostAsJsonAsync(
+            "auth/logout",
+            requestPayload);
+
+        Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
         
-        var registerResponse = await _client.PostAsJsonAsync(
-            "auth/register",
-            registerPayload);
-
-        Assert.Equal(HttpStatusCode.Created, registerResponse.StatusCode);
+        var refreshResponse = await _client.PostAsJsonAsync(
+            "auth/refresh",
+            requestPayload);
         
-        // Login to get the token pair
-        var loginPayload = new { email = email, password = AuthTestHelper.TestPassword };
-
-        var loginResponse = await _client.PostAsJsonAsync(
-            "auth/login",
-            loginPayload);
-
-        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
-
-        var loginTokenData = await loginResponse.Content.ReadFromJsonAsync<TokenResponse>();
-        Assert.NotNull(loginTokenData);
-        Assert.False(string.IsNullOrWhiteSpace(loginTokenData.AccessToken));
-        Assert.False(string.IsNullOrWhiteSpace(loginTokenData.RefreshToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
     }
 
     [Fact]
-    public async Task Refresh_WithInvalidRefreshToken_ShouldReturnUnauthorizedWithInvalidRefreshTokenError()
+    public async Task Logout_WithAlreadyRevokedRefreshToken_ShouldReturnNoContent()
     {
-        var refreshPayload = new { refreshToken = "invalid-refresh-token" };
-        var refreshResponse = await _client.PostAsJsonAsync(
-            "auth/refresh",
-            refreshPayload);
+        var user = await AuthTestHelper.CreateAuthenticatedUserAsync(_client);
+        var refreshToken = user.RefreshToken;
         
-        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
+        var requestPayload = new { refreshToken };
+
+        var logoutResponse = await _client.PostAsJsonAsync(
+            "auth/logout",
+            requestPayload);
         
-        var problem =
-            await refreshResponse.Content.ReadFromJsonAsync<AuthTestHelper.ApiProblemDetails>();
+        Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
         
-        Assert.NotNull(problem);
-        Assert.Equal(401, problem.Status);
-        Assert.Contains(
-            "Tokens.InvalidRefreshToken",
-            problem.ErrorCodes);
+        var repeatedLogoutResponse = await _client.PostAsJsonAsync(
+            "auth/logout",
+            requestPayload);
+
+        Assert.Equal(HttpStatusCode.NoContent, repeatedLogoutResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Logout_WithUnknownRefreshToken_ShouldReturnNoContent()
+    {
+        var requestPayload = new { refreshToken = "i-do-not-exist" };
+        var logoutResponse = await _client.PostAsJsonAsync(
+            "auth/logout",
+            requestPayload);
+
+        Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
     }
 }

@@ -1,4 +1,5 @@
 using IdentityHub.Application.Features.Login;
+using IdentityHub.Application.Features.Logout;
 using IdentityHub.Application.Features.RefreshTokens;
 using IdentityHub.Application.Features.Register;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -13,6 +14,7 @@ public static class AuthEndpoints
         group.MapPost("/register", RegisterAsync);
         group.MapPost("/login", LoginAsync);
         group.MapPost("/refresh", RefreshAsync);
+        group.MapPost("/logout", LogoutAsync);
         return app;
     }
 
@@ -44,5 +46,13 @@ public static class AuthEndpoints
             return result.ToProblem(StatusCodes.Status401Unauthorized);
 
         return TypedResults.Ok(TokenResponse.From(result.Value));
+    }
+    
+    private static async Task<NoContent> LogoutAsync(
+        LogoutRequest request, LogoutUserUseCase useCase, CancellationToken ct)
+    {
+        await useCase.HandleAsync(request.RefreshToken, ct);
+
+        return TypedResults.NoContent();
     }
 }
