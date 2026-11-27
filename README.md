@@ -1,22 +1,26 @@
 # IdentityHub
 
-IdentityHub is a .NET 10 authentication API built to demonstrate how user registration, JWT authentication, and renewable sessions fit together in a layered backend. Its core focus is the refresh-token lifecycle: rotation, reuse detection, bounded session lifetimes, and revocation across multiple logins.
+A .NET 10 authentication API covering registration, JWT access tokens and renewable refresh-token sessions. The main focus is the refresh-token lifecycle: rotation on every refresh, reuse detection, a sliding window with an absolute session cap, and revocation across multiple logins.
 
-The solution separates HTTP contracts, application use cases, domain rules, and infrastructure. It includes PostgreSQL persistence, a Docker development environment, unit and API integration tests, and a GitHub Actions build-and-test workflow.
+The solution uses a layered architecture (API, Application, Domain, Infrastructure), PostgreSQL via EF Core, Docker Compose for local development, 49 unit and integration tests, and a GitHub Actions build-and-test pipeline.
 
-## Features
+## Key engineering decisions
 
-- Register users through ASP.NET Core Identity and assign the default `User` role.
-- Authenticate with email and password and issue JWT access tokens plus opaque refresh tokens.
-- Rotate refresh tokens on every successful refresh.
-- Detect reuse of revoked refresh tokens and revoke the user's active refresh tokens across sessions.
-- Combine sliding refresh expiry with an absolute session limit.
-- Log out using a refresh token, or revoke all active refresh tokens using an authenticated request.
-- Read the authenticated user's ID, email, and roles through `/users/me`.
-- Return validation problems and Problem Details for application failures.
-- Generate an OpenAPI document in Development.
+- **Refresh-token reuse detection.** Presenting a revoked refresh token revokes every active session for that user, on the assumption that the token has been stolen.
+- **Sliding expiry with an absolute cap.** Each refresh extends the session, but never past 30 days from the original login. `SessionStartedAt` is carried through every rotation to enforce this.
+- **Token rules live in the domain.** `RefreshToken` owns issuance, expiry and revocation logic, and the Domain project has no external package dependencies.
+- **Injected time.** Use cases and token generation take `TimeProvider`, so expiry scenarios are tested with a fixed clock.
+- **Atomic rotation.** Revoking the old token and adding its replacement is saved in a single `SaveChangesAsync` call.
 
-This repository implements a focused authentication backend. It does not expose administrative provisioning or role-management endpoints, an OAuth/OIDC protocol server, or a frontend.
+## Quick start
+
+Requires Docker with Compose v2.
+
+```bash
+docker compose up --build -d postgres api
+```
+
+The API runs at `http://localhost:8080`, with the OpenAPI document at `http://localhost:8080/openapi/v1.json`. Migrations and role seeding run on startup.
 
 ## Architecture
 
@@ -32,88 +36,86 @@ flowchart TD
 
 | Project | Responsibility |
 | --- | --- |
-| `IdentityHub.API` | Request/response contracts, endpoint mapping, authentication middleware, error mapping, and application startup. |
-| `IdentityHub.Application` | Registration, login, refresh, logout, and logout-all use cases; service/repository interfaces; results and authentication options. |
-| `IdentityHub.Domain` | Refresh-token issuance, expiry and revocation rules, plus role constants. No external package dependencies. |
-| `IdentityHub.Infrastructure` | ASP.NET Core Identity adapters, JWT generation/validation, EF Core repositories, migrations, and role seeding. |
+| `IdentityHub.API` | Request/response contracts, endpoint mapping, authentication middleware, error mapping, startup |
+| `IdentityHub.Application` | Register, login, refresh, logout and logout-all use cases; service and repository interfaces; result types and options |
+| `IdentityHub.Domain` | Refresh-token issuance, expiry and revocation rules; role constants |
+| `IdentityHub.Infrastructure` | ASP.NET Core Identity adapter, JWT generation and validation, EF Core repositories, migrations, role seeding |
 
-Application use cases depend on `IIdentityService`, `ITokenService`, and `IRefreshTokenRepository`. Infrastructure provides their implementations. The API composes these services through dependency injection; endpoints translate use-case results into HTTP responses.
+Use cases depend on `IIdentityService`, `ITokenService` and `IRefreshTokenRepository`, which Infrastructure implements. Endpoints map use-case results to HTTP responses.
 
-## Authentication and security
+## Features
+
+- Registration through ASP.NET Core Identity, with the default `User` role assigned
+- Email and password login returning a JWT access token and an opaque refresh token
+- Refresh-token rotation, reuse detection and an absolute session limit
+- Logout of a single session, or of all sessions for the authenticated user
+- `/users/me` returning the current user's ID, email and roles from the token
+- Validation problems and Problem Details responses for failures
+- OpenAPI document in Development
+
+## How authentication works
 
 ### Credentials and roles
 
-ASP.NET Core Identity manages users and password hashes. The configured password policy requires:
+ASP.NET Core Identity stores users and password hashes. The password policy requires at least 12 characters, with uppercase, lowercase, a digit, a non-alphanumeric character and at least two unique characters.
 
-- At least 12 characters.
-- Uppercase and lowercase letters, a digit, and a non-alphanumeric character.
-- At least two unique characters.
-
-Registration uses the email as both username and email. Duplicate registration with the same email is covered by an API test; the implementation relies on Identity's username uniqueness rather than an explicitly configured unique-email requirement.
-
-Startup seeds `User` and `Admin` roles. Registration assigns `User`; it does not create an administrator. If role assignment fails, registration attempts to delete the newly created user as compensation. That rollback is best effort, rather than a shared database transaction.
+The email address is used as both username and email. `User` and `Admin` roles are seeded at startup; registration always assigns `User`. If role assignment fails, the newly created user is deleted.
 
 ### Access tokens
 
-Access tokens are signed with HMAC-SHA256 and contain `sub` (user ID), `email`, `jti`, and `role` claims. Bearer validation checks issuer, audience, signing key, and lifetime; accepts only HMAC-SHA256; and uses zero clock skew. Inbound claim mapping is disabled so endpoints use the original claim names.
-
-`/users/me` reads these claims from the token, rather than querying the user's current database record. Email and roles therefore reflect the issued token. Refresh retrieves the current email and roles before creating a new access token.
+Access tokens are signed with HMAC-SHA256 and carry `sub`, `email`, `jti` and `role` claims. Validation checks issuer, audience, signing key and lifetime, accepts only HMAC-SHA256, and uses zero clock skew. Inbound claim mapping is disabled so endpoints read the original claim names.
 
 ### Refresh-token rotation
 
-Refresh tokens are Base64-encoded values generated from 64 cryptographically random bytes. Each login creates a separate refresh-token record and starts a new session.
+Refresh tokens are 64 cryptographically random bytes, Base64-encoded. Each login starts a new session with its own token record.
 
-On a successful refresh:
+On refresh:
 
-1. Load the submitted token and reject invalid, revoked, expired, or absolutely expired sessions.
-2. Fetch the user's email and roles and generate a new token pair.
-3. Preserve the original `SessionStartedAt` on the replacement refresh token.
-4. Revoke the previous token and record the replacement value in `ReplacedByToken`.
-5. Add the replacement and persist both changes with one `SaveChangesAsync` call.
+1. Reject the token if it is unknown, revoked, expired or past the absolute session limit.
+2. Load the user's current email and roles and generate a new token pair.
+3. Carry `SessionStartedAt` over to the replacement token.
+4. Revoke the old token and record the replacement in `ReplacedByToken`.
+5. Save both changes in one `SaveChangesAsync` call.
 
-The replacement expiry is calculated as:
+The replacement's expiry is:
 
 ```text
 min(now + RefreshTokenLifetimeDays,
-    original SessionStartedAt + AbsoluteRefreshTokenLifetimeDays)
+    SessionStartedAt + AbsoluteRefreshTokenLifetimeDays)
 ```
 
-The Development configuration uses a **15-minute access token**, a **7-day refresh window**, and a **30-day absolute session limit**. Refresh cannot revive an already expired token. The initial login token uses the configured refresh lifetime directly; the absolute cap is checked during refresh.
+Development defaults: 15-minute access tokens, a 7-day refresh window and a 30-day absolute session limit.
 
 ### Reuse detection
 
-Submitting any stored, revoked refresh token to `/auth/refresh` triggers the reuse response. The use case revokes **all currently active refresh tokens for that user**, saves the revocations even though the request fails, and returns `401`.
+If a revoked refresh token is submitted to `/auth/refresh`, all active refresh tokens for that user are revoked across every session, the revocations are saved, and the request returns `401`. This applies to tokens revoked by logout as well as by rotation, so a client should always discard its old refresh token after a successful refresh.
 
-This response spans independent logins; it is not restricted to a replacement chain. The implementation checks revocation before expiry and does not distinguish rotation from logout. Consequently, refreshing a token revoked by logout also triggers user-wide revocation.
+Unknown, expired and revoked refresh tokens all return the same error code (`Tokens.InvalidRefreshToken`), and unknown users and wrong passwords both return `Users.InvalidCredentials`, so responses don't reveal which case occurred.
 
-Unknown, expired, revoked, and absolutely expired refresh tokens share the application error `Tokens.InvalidRefreshToken`. Invalid login credentials share `Users.InvalidCredentials` for unknown users and incorrect passwords.
+### Logout
 
-Clients should replace their stored refresh token after a successful refresh and avoid submitting an old token again. Concurrent refresh requests are not protected by an explicit concurrency token or locking mechanism in this repository; exactly-one-success behavior under simultaneous requests is not established by the tests.
-
-### Logout semantics
-
-| Operation | Behavior |
+| Endpoint | Behaviour |
 | --- | --- |
-| `POST /auth/logout` | Accepts a refresh token without requiring an access token. Revokes that specific stored token if it is not already revoked. Unknown or already revoked tokens are no-ops; the endpoint returns `204`. It does not follow `ReplacedByToken` to revoke a successor. |
-| `POST /auth/logout-all` | Requires a valid bearer access token. Uses its `sub` claim to revoke every active refresh token belonging to that user, with one save. Returns `204`, including when there are no active tokens. |
+| `POST /auth/logout` | Revokes the submitted refresh token. Unknown or already revoked tokens are a no-op. Always returns `204`. |
+| `POST /auth/logout-all` | Requires a bearer token. Revokes every active refresh token for the `sub` user in one save. Returns `204`. |
 
-**Already issued access tokens remain valid until their expiry.** Logout and reuse detection revoke renewable sessions; the API does not maintain an access-token denylist or perform per-request security-stamp checks.
+Access tokens are not denylisted, so an issued access token stays valid until it expires (15 minutes by default). Logout ends the renewable session.
 
 ## API endpoints
 
-JSON property names use camel case. Protected endpoints accept `Authorization: Bearer <accessToken>`.
+JSON uses camel case. Protected endpoints take `Authorization: Bearer <accessToken>`.
 
-| Method | Path | Authentication | Request | Responses from implemented handlers |
+| Method | Path | Auth | Request | Responses |
 | --- | --- | --- | --- | --- |
-| `POST` | `/auth/register` | None required | `email`, `password` | `201` with `userId`; `400` validation problem on registration failure. |
-| `POST` | `/auth/login` | None required | `email`, `password` | `200` with token pair; `401` Problem Details on invalid credentials. |
-| `POST` | `/auth/refresh` | Refresh token in body | `refreshToken` | `200` with replacement token pair; `401` Problem Details on rejected refresh. |
-| `POST` | `/auth/logout` | Refresh token in body | `refreshToken` | `204`. |
-| `POST` | `/auth/logout-all` | Bearer token | No body | `204`; `401` when unauthenticated. |
-| `GET` | `/users/me` | Bearer token | No body | `200` with `userId`, `email`, and `roles`; `401` when unauthenticated. |
-| `GET` | `/openapi/v1.json` | None required | No body | OpenAPI document, available only in Development. |
+| `POST` | `/auth/register` | None | `email`, `password` | `201` with `userId`; `400` validation problem |
+| `POST` | `/auth/login` | None | `email`, `password` | `200` token pair; `401` invalid credentials |
+| `POST` | `/auth/refresh` | Refresh token in body | `refreshToken` | `200` new token pair; `401` rejected refresh |
+| `POST` | `/auth/logout` | Refresh token in body | `refreshToken` | `204` |
+| `POST` | `/auth/logout-all` | Bearer | None | `204`; `401` unauthenticated |
+| `GET` | `/users/me` | Bearer | None | `200` with `userId`, `email`, `roles`; `401` unauthenticated |
+| `GET` | `/openapi/v1.json` | None | None | OpenAPI document (Development only) |
 
-Login and refresh return this shape; token values below are placeholders and lifetimes illustrate the default login configuration:
+Login and refresh response:
 
 ```json
 {
@@ -125,89 +127,58 @@ Login and refresh return this shape; token values below are placeholders and lif
 }
 ```
 
-Refresh-token lifetime returned by refresh may be shorter near the absolute session limit. Login and refresh failures include an `errorCodes` array in Problem Details. Registration failures group Identity errors by code in a validation-problem response. Malformed requests and unexpected exceptions may produce additional framework-level errors.
+Near the absolute session limit, `refreshTokenExpiresInSeconds` on a refresh will be shorter than the full window. Login and refresh failures include an `errorCodes` array in the Problem Details body.
 
-## Tech stack
+## Running locally
 
-| Area | Technology |
-| --- | --- |
-| Runtime and API | C#, .NET 10, ASP.NET Core Minimal APIs |
-| User and role storage | ASP.NET Core Identity with GUID identifiers |
-| Persistence | Entity Framework Core 10 and Npgsql |
-| Database | PostgreSQL 18 Alpine in Compose and CI |
-| Tokens | JWT bearer authentication, Microsoft.IdentityModel.JsonWebTokens, HMAC-SHA256 |
-| API description | ASP.NET Core OpenAPI |
-| Tests | xUnit, NSubstitute, WebApplicationFactory, Coverlet collector |
-| Packaging and CI | Multi-stage Dockerfile, Docker Compose, GitHub Actions |
+Run commands from the repository root.
 
-Exact package versions are recorded in the project files. The local EF CLI tool is pinned to `10.0.9` in `.config/dotnet-tools.json`.
-
-## Run locally
-
-Run commands from the repository root, where `IdentityHub.slnx` and `compose.yaml` live.
-
-### Option 1: API and database in Docker
-
-Requirements: Docker with a running daemon and Docker Compose v2. A host .NET SDK is not needed for this option.
+### API and database in Docker
 
 ```bash
 docker compose up --build -d postgres api
 docker compose logs -f api
-```
-
-The API is available at `http://localhost:8080`; the development OpenAPI document is at `http://localhost:8080/openapi/v1.json`.
-
-Compose starts PostgreSQL, waits for its health check, and runs the API in Development. The API applies migrations and seeds roles before accepting requests. The container connection string uses the Compose hostname `postgres`.
-
-```bash
 docker compose down
 ```
 
-The main database persists in the named `identityhub-pgdata` volume. `docker compose down` retains that volume.
+Data persists in the `identityhub-pgdata` volume.
 
-### Option 2: API on the host, PostgreSQL in Docker
+### API on the host, database in Docker
 
-Requirements: .NET 10 SDK, plus Docker and Compose for PostgreSQL. A separately managed PostgreSQL instance can also be used if its connection string is configured accordingly.
+Requires the .NET 10 SDK.
 
 ```bash
 docker compose up -d postgres
-dotnet restore IdentityHub.slnx
-dotnet build IdentityHub.slnx
 dotnet run --project src/IdentityHub.API --launch-profile http
 ```
 
-The `http` launch profile sets Development and serves the API at `http://localhost:5022`. Its OpenAPI document is at `http://localhost:5022/openapi/v1.json`. The `https` profile also specifies `https://localhost:7175` and requires a usable development certificate.
+The `http` profile serves the API at `http://localhost:5022`. Example requests are in `src/IdentityHub.API/IdentityHub.API.http`; the environment file `http-client.env.json` points at port `8080`, so change it to `5022` for this option.
 
-The supplied Rider HTTP client environment points to port `8080`. Adjust `src/IdentityHub.API/http-client.env.json` to port `5022` when using the host launch profile. Example requests are in `src/IdentityHub.API/IdentityHub.API.http`; some comments in that file predate the current implementation.
-
-### Database and configuration
+### Configuration
 
 | Setting | Development value |
 | --- | --- |
-| Host database | `localhost:5432`, database `identityhub` |
+| Database | `localhost:5432`, database `identityhub` |
 | Test database | `localhost:5433`, database `identityhubtest` |
-| Local database credentials | Username `postgres`, password `postgres` |
-| Connection-string key | `ConnectionStrings:Default` |
+| Database credentials | `postgres` / `postgres` |
+| Connection string key | `ConnectionStrings:Default` |
 | JWT issuer / audience | `IdentityHub` / `IdentityHub.Clients` |
 | JWT secret key | `Authentication:Jwt:Secret` |
 
-Development settings are in `src/IdentityHub.API/appsettings.Development.json`. Environment variables can override configuration using double underscores, such as `ConnectionStrings__Default` and `Authentication__Jwt__Secret`.
+Development settings are in `src/IdentityHub.API/appsettings.Development.json`. Override them with environment variables such as `ConnectionStrings__Default` and `Authentication__Jwt__Secret`. Outside Development, the database and JWT settings must be supplied; startup validation requires a JWT secret of at least 32 characters and checks token lifetimes are in range. The committed secret and credentials are for local development only.
 
-The base `appsettings.json` does not supply database or JWT settings. Running outside Development requires providing them. JWT options require issuer, audience, and a secret of at least 32 characters; token lifetimes are range-validated at startup. The committed JWT secret and database credentials are development values.
-
-Migrations run automatically at startup in every environment. For explicit migration management, the repository includes a local EF tool manifest:
+Migrations run on startup. To apply them manually:
 
 ```bash
 dotnet tool restore
-# macOS/Linux: load the development configuration for the startup project
 ASPNETCORE_ENVIRONMENT=Development dotnet ef database update \
   --project src/IdentityHub.Infrastructure \
   --startup-project src/IdentityHub.API
 ```
 
-### Try the authentication flow
+### Try it
 
-Use port `8080` for Docker or `5022` for the host HTTP profile:
+Use port `8080` for Docker or `5022` for the host profile.
 
 ```bash
 curl -i http://localhost:8080/auth/register \
@@ -219,7 +190,7 @@ curl -s http://localhost:8080/auth/login \
   -d '{"email":"demo@example.com","password":"DemoPassword123!"}'
 ```
 
-Copy the returned token values into the following requests:
+Then use the returned tokens:
 
 ```bash
 curl http://localhost:8080/users/me \
@@ -235,27 +206,23 @@ curl -i -X POST http://localhost:8080/auth/logout-all \
 
 ## Testing
 
-The supplied source contains **49 xUnit `[Fact]` tests** across four test projects:
+49 xUnit tests across four projects:
 
-| Project | Tests | Coverage focus |
+| Project | Tests | Focus |
 | --- | ---: | --- |
-| `IdentityHub.Domain.Tests` | 7 | Refresh-token issuance guards, state, and revocation. |
-| `IdentityHub.Application.Tests` | 20 | Login, rotation, invalid/expired tokens, absolute expiry, reuse response, logout, logout-all, and result invariants. |
-| `IdentityHub.Infrastructure.Tests` | 4 | JWT claims, issuer/audience/signature, configured expiry, and random refresh-token format. |
-| `IdentityHub.API.Tests` | 18 | HTTP registration/login/refresh/logout flows, protected endpoints, reuse invalidating a replacement, and logout across two sessions. |
+| `IdentityHub.Domain.Tests` | 7 | Refresh-token issuance guards, state and revocation |
+| `IdentityHub.Application.Tests` | 20 | Login, rotation, expiry, absolute session limit, reuse detection, logout and logout-all |
+| `IdentityHub.Infrastructure.Tests` | 4 | JWT claims, issuer/audience/signature, expiry and refresh-token format |
+| `IdentityHub.API.Tests` | 18 | End-to-end HTTP flows: registration, login, refresh, logout, protected endpoints, reuse invalidating a replacement token, logout across two sessions |
 
-API tests use `WebApplicationFactory` with a real PostgreSQL database. The factory hardcodes `localhost:5433`, database `identityhubtest`, and credentials `postgres`/`postgres`; it does not provision its own database container.
+The API tests run against a real PostgreSQL database through `WebApplicationFactory`. They use the dedicated `postgres-test` service on port `5433`, and clear user data on startup, so don't point them at another database.
 
 ```bash
 docker compose up -d postgres-test
-# Wait until postgres-test is healthy before running the suite.
-docker compose ps postgres-test
 dotnet test IdentityHub.slnx
 ```
 
-The API test fixture deletes users and related authentication data from its configured test database during initialization. Use the dedicated test database. Its Compose service has no configured named data volume.
-
-Unit tests can be run without PostgreSQL:
+Unit tests only (no database needed):
 
 ```bash
 dotnet test tests/IdentityHub.Domain.Tests
@@ -263,73 +230,62 @@ dotnet test tests/IdentityHub.Application.Tests
 dotnet test tests/IdentityHub.Infrastructure.Tests
 ```
 
-Coverlet collectors are included in the test projects; optional coverage collection is available with:
+Coverage:
 
 ```bash
 dotnet test IdentityHub.slnx --collect:"XPlat Code Coverage"
 ```
 
-The test count describes the supplied source, not an independently verified passing run. The archive does not contain a test-run report.
-
 ## Continuous integration
 
-`.github/workflows/ci.yml` defines one `build-test` job on `ubuntu-latest`, triggered by pushes to `main` and pull requests targeting `main`.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request to `main`. It starts a `postgres:18-alpine` service on port `5433`, then restores, builds in Release and runs the full test suite.
 
-The job starts a health-checked `postgres:18-alpine` service with `identityhubtest` mapped to port `5433`, installs .NET `10.0.x`, and runs:
+## Tech stack
 
-```bash
-dotnet restore
-dotnet build --no-restore --configuration Release
-dotnet test --no-build --configuration Release --verbosity normal
-```
-
-The workflow builds and tests the solution. It does not deploy the API, publish Docker images, or upload coverage. A live CI result cannot be established from the workflow file alone.
+| Area | Technology |
+| --- | --- |
+| Runtime and API | C#, .NET 10, ASP.NET Core Minimal APIs |
+| Users and roles | ASP.NET Core Identity with GUID keys |
+| Persistence | EF Core 10, Npgsql, PostgreSQL 18 |
+| Tokens | JWT bearer authentication, Microsoft.IdentityModel.JsonWebTokens, HMAC-SHA256 |
+| API description | ASP.NET Core OpenAPI |
+| Tests | xUnit, NSubstitute, WebApplicationFactory, Coverlet |
+| Build and CI | Multi-stage Dockerfile, Docker Compose, GitHub Actions |
 
 ## Project structure
 
 ```text
-IdentityHub.slnx
 src/
   IdentityHub.API/
-    Endpoints/Auth/                 # Authentication HTTP contracts and routes
-    Endpoints/Users/                # Current-user endpoint
-    Common/Extensions/             # Required claim extraction
+    Endpoints/Auth/          # Auth contracts and routes
+    Endpoints/Users/         # Current-user endpoint
+    Common/Extensions/       # Claim extraction
   IdentityHub.Application/
-    Features/                      # Register, Login, RefreshTokens, Logout, LogoutAll
-    Common/                        # Interfaces, options, results, errors, models
+    Features/                # Register, Login, RefreshTokens, Logout, LogoutAll
+    Common/                  # Interfaces, options, results, errors
   IdentityHub.Domain/
-    Entities/RefreshToken.cs        # Session and token state rules
+    Entities/RefreshToken.cs # Session and token rules
     Constants/UserRoles.cs
   IdentityHub.Infrastructure/
-    Identity/                      # Identity adapter and JWT services
-    Persistence/                   # DbContext, repository, mappings, migrations
-    RoleSeeder.cs
-    InfrastructureInitializerExtensions.cs
+    Identity/                # Identity adapter and JWT services
+    Persistence/             # DbContext, repository, mappings, migrations
 tests/
   IdentityHub.API.Tests/
   IdentityHub.Application.Tests/
   IdentityHub.Domain.Tests/
   IdentityHub.Infrastructure.Tests/
-.github/workflows/ci.yml
-.config/dotnet-tools.json
-compose.yaml
-Dockerfile
 ```
 
-## Key design decisions and current boundaries
+## Roadmap
 
-- **Separate authentication workflows from transport and persistence.** Small use-case classes express behavior through interfaces, while Minimal API handlers own HTTP response mapping.
-- **Keep token state in the domain.** Issuance validates required identifiers and timestamps; expiry includes the exact expiry instant; revocation is idempotent. Persistence enforces unique token values and cascades refresh-token deletion when a user is deleted.
-- **Inject time.** Use cases and token generation use `TimeProvider`, allowing fixed clocks in tests without waiting for real expiration.
-- **Preserve session origin through rotation.** `SessionStartedAt` supports an absolute cap even as refresh expiry slides. Its migration backfills existing records from `CreatedAt`.
-- **Persist revocation on rejected reuse.** A failed refresh can still require a database write because the rejection also ends other renewable sessions.
-- **Keep logout predictable.** Single-token logout is idempotent; logout-all identifies the user through an authenticated subject claim and saves bulk revocations once.
+Planned next:
 
-The current implementation stores refresh-token values directly in PostgreSQL, including replacement values; it does not hash them at rest. Revoked records remain available for reuse detection, and no token-cleanup job is included. Rotation has no explicit concurrency protection, and logout-all revokes the active tokens fetched by that request rather than establishing a permanent block on new logins.
+- Hash refresh tokens at rest (SHA-256) instead of storing raw values
+- Add a concurrency token to rotation so two simultaneous refreshes of the same token can't both succeed
+- Account lockout after repeated failed logins, and rate limiting on the auth endpoints
+- A cleanup job for expired and revoked tokens
 
-There are no implemented flows for email confirmation, password reset, MFA, external login, or public role administration. Login directly checks passwords with `UserManager.CheckPasswordAsync`; failed-attempt tracking and lockout enforcement are not implemented in that path. The API also contains no rate-limiting or CORS configuration, Swagger UI, HTTPS-redirection middleware, or HSTS setup. Docker's supplied development endpoint uses HTTP.
-
-These boundaries make the project a demonstrable authentication implementation with explicit tradeoffs; they should be reviewed before adapting it for a production service.
+Out of scope for this project: email confirmation, password reset, MFA, external login providers, role administration endpoints and an OAuth/OIDC server.
 
 ## License
 
