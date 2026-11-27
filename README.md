@@ -1,5 +1,12 @@
 # IdentityHub
 
+[![CI](https://github.com/juhagh/identityhub-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juhagh/identityhub-api/actions/workflows/ci.yml)
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![JWT](https://img.shields.io/badge/Auth-JWT-000000?logo=jsonwebtokens&logoColor=white)](https://jwt.io)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 A .NET 10 authentication API covering registration, JWT access tokens and renewable refresh-token sessions. The main focus is the refresh-token lifecycle: rotation on every refresh, reuse detection, a sliding window with an absolute session cap, and revocation across multiple logins.
 
 The solution uses a layered architecture (API, Application, Domain, Infrastructure), PostgreSQL via EF Core, Docker Compose for local development, 49 unit and integration tests, and a GitHub Actions build-and-test pipeline.
